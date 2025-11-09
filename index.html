@@ -59,7 +59,6 @@
     }
 
     svg.overlay .feature {
-      fill: rgba(56, 189, 248, 0.18);
       cursor: pointer;
       pointer-events: auto;
       transition: fill 0.2s ease, stroke 0.2s ease;
@@ -67,16 +66,26 @@
 
     svg.overlay .feature:hover,
     svg.overlay .feature.selected {
-      fill: var(--accent-muted);
+      filter: brightness(1.05);
     }
 
     svg.overlay .feature.selected.municipality-level {
-      fill: var(--accent-strong);
+      filter: brightness(1.15);
     }
 
     svg.overlay .germany-mask {
       fill: rgba(15, 23, 42, 0.55);
       pointer-events: none;
+    }
+
+    .leaflet-bar a.palette-button span {
+      display: inline-block;
+      transition: opacity 0.2s ease, filter 0.2s ease;
+    }
+
+    .leaflet-bar a.palette-button.palette-off span {
+      opacity: 0.35;
+      filter: grayscale(0.95);
     }
 
     .info-panel {
@@ -177,6 +186,17 @@
     const MUNICIPALITY_FILE = "topojson/germany_municipalities_with_wiki.json";
     const WIKIPEDIA_BASE_URL = "https://de.wikipedia.org/wiki/";
     const DEFAULT_DETAIL = "Fahre über eine Gemeinde, um Jahr und Beschreibung zu sehen. Klick öffnet Wikipedia. Auf Touch-Geräten bitte doppelt tippen.";
+    const YEAR_MIN = 600;
+    const YEAR_MAX = 1850;
+    const COLOR_STOPS = [
+      { year: YEAR_MIN, color: "#065f46" }, // Dunkelgrün
+      { year: 1200, color: "#facc15" }, // Gelb
+      { year: YEAR_MAX, color: "#b91c1c" }, // Rot
+    ];
+    const DEFAULT_COLOR = "#475569";
+    const NEUTRAL_COLOR = "#38bdf8";
+    const GRADIENT_FILL_OPACITY = 0.9;
+    const NEUTRAL_FILL_OPACITY = 0.35;
 
     const infoPanel = document.getElementById("info-panel");
     const infoTitle = document.getElementById("info-title");
@@ -192,6 +212,8 @@
       return touchPoints > 0;
     })();
     let tapTimer = null;
+    let gradientEnabled = true;
+    let paletteControlButton = null;
 
     const map = L.map("map", {
       minZoom: 5,
@@ -236,6 +258,18 @@
       toggleInfoPanelForViewport();
     });
     toggleInfoPanelForViewport();
+    const toolbarControl = L.control({ position: "topleft" });
+    toolbarControl.onAdd = () => {
+      const container = L.DomUtil.create("div", "leaflet-bar custom-map-controls");
+      paletteControlButton = createControlButton(container, "🎨", "Farbverlauf deaktivieren");
+      paletteControlButton.classList.add("palette-button");
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.disableScrollPropagation(container);
+      return container;
+    };
+    toolbarControl.addTo(map);
+    bindControlEvents();
+    updatePaletteToggleUI();
 
     resetInfo();
     showLoading(true);
@@ -285,6 +319,36 @@
       infoPanel.classList.toggle("show-on-mobile", isSmallScreen);
     }
 
+    function createControlButton(container, symbol, title) {
+      const button = L.DomUtil.create("a", "leaflet-control-button", container);
+      button.href = "#";
+      button.setAttribute("role", "button");
+      button.setAttribute("aria-label", title);
+      button.title = title;
+      button.innerHTML = `<span aria-hidden="true" style="font-size:1.35rem;line-height:1;display:inline-flex;align-items:center;justify-content:center;height:100%;">${symbol}</span>`;
+      return button;
+    }
+
+    function bindControlEvents() {
+      if (!paletteControlButton) return;
+      L.DomEvent.on(paletteControlButton, "click", (event) => {
+        L.DomEvent.stop(event);
+        gradientEnabled = !gradientEnabled;
+        updatePaletteToggleUI();
+        refreshFeatureColors();
+      });
+    }
+
+    function updatePaletteToggleUI() {
+      if (!paletteControlButton) return;
+      const title = gradientEnabled ? "Farbverlauf deaktivieren" : "Farbverlauf aktivieren";
+      paletteControlButton.classList.toggle("toggle-active", gradientEnabled);
+      paletteControlButton.classList.toggle("palette-off", !gradientEnabled);
+      paletteControlButton.setAttribute("aria-pressed", gradientEnabled ? "true" : "false");
+      paletteControlButton.setAttribute("aria-label", title);
+      paletteControlButton.title = title;
+    }
+
     function setInfo(title, detailHtml) {
       infoTitle.textContent = title;
       infoDetail.innerHTML = detailHtml;
@@ -314,6 +378,73 @@
 
     function descriptionFor(feature) {
       return feature?.properties?.DS ? String(feature.properties.DS) : "";
+    }
+
+    function clampYearValue(year) {
+      if (year == null) return null;
+      if (year < YEAR_MIN) return YEAR_MIN;
+      if (year > YEAR_MAX) return YEAR_MAX;
+      return year;
+    }
+
+    function hexToRgb(hex) {
+      const value = hex.replace("#", "");
+      const int = parseInt(value, 16);
+      return {
+        r: (int >> 16) & 255,
+        g: (int >> 8) & 255,
+        b: int & 255,
+      };
+    }
+
+    function rgbToHex({ r, g, b }) {
+      const toHex = (component) => component.toString(16).padStart(2, "0");
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+
+    function interpolateColor(colorA, colorB, t) {
+      const start = hexToRgb(colorA);
+      const end = hexToRgb(colorB);
+      const clampT = Math.min(1, Math.max(0, t));
+      const mix = {
+        r: Math.round(start.r + (end.r - start.r) * clampT),
+        g: Math.round(start.g + (end.g - start.g) * clampT),
+        b: Math.round(start.b + (end.b - start.b) * clampT),
+      };
+      return rgbToHex(mix);
+    }
+
+    function colorForYearValue(year) {
+      const clamped = clampYearValue(year);
+      if (clamped == null) {
+        return DEFAULT_COLOR;
+      }
+      for (let i = 0; i < COLOR_STOPS.length - 1; i += 1) {
+        const current = COLOR_STOPS[i];
+        const next = COLOR_STOPS[i + 1];
+        if (clamped >= current.year && clamped <= next.year) {
+          const span = next.year - current.year || 1;
+          const t = (clamped - current.year) / span;
+          return interpolateColor(current.color, next.color, t);
+        }
+      }
+      return COLOR_STOPS[COLOR_STOPS.length - 1].color;
+    }
+
+    function baseFillFor(feature) {
+      if (!gradientEnabled) {
+        return NEUTRAL_COLOR;
+      }
+      const year = yearFor(feature);
+      return year == null ? DEFAULT_COLOR : colorForYearValue(year);
+    }
+
+    function baseOpacityFor() {
+      return gradientEnabled ? GRADIENT_FILL_OPACITY : NEUTRAL_FILL_OPACITY;
+    }
+
+    function lightenColor(hex, factor = 0.2) {
+      return interpolateColor(hex, "#ffffff", factor);
     }
 
     function wikipediaLinkFor(feature) {
@@ -348,7 +479,24 @@
 
     function highlightPath(pathNode, active) {
       if (!pathNode) return;
-      d3.select(pathNode).classed("selected", !!active);
+      const node = d3.select(pathNode);
+      const baseColor = node.attr("data-base-fill") || NEUTRAL_COLOR;
+      const baseOpacity = Number(node.attr("data-base-opacity")) || baseOpacityFor();
+      if (active) {
+        node
+          .attr("stroke", "rgba(248, 250, 252, 0.85)")
+          .attr("stroke-width", 0.8)
+          .style("fill", lightenColor(baseColor, 0.25))
+          .style("fill-opacity", Math.min(1, baseOpacity + 0.15))
+          .classed("selected", true);
+        return;
+      }
+      node
+        .attr("stroke", "none")
+        .attr("stroke-width", 0)
+        .style("fill", baseColor)
+        .style("fill-opacity", baseOpacity)
+        .classed("selected", false);
     }
 
     function attachFeatureEvents(selection) {
@@ -403,6 +551,43 @@
       }
     }
 
+    function applyBaseFill(selection) {
+      selection.each(function (feature) {
+        const baseColor = baseFillFor(feature);
+        const baseOpacity = baseOpacityFor();
+        d3.select(this)
+          .attr("data-base-fill", baseColor)
+          .attr("data-base-opacity", baseOpacity)
+          .style("fill", baseColor)
+          .style("fill-opacity", baseOpacity)
+          .attr("stroke", "none")
+          .attr("stroke-width", 0);
+      });
+    }
+
+    function refreshFeatureColors() {
+      featureLayer.selectAll("path.feature").each(function (feature) {
+        const node = d3.select(this);
+        const baseColor = baseFillFor(feature);
+        const baseOpacity = baseOpacityFor();
+        node.attr("data-base-fill", baseColor);
+        node.attr("data-base-opacity", baseOpacity);
+        if (node.classed("selected")) {
+          node
+            .attr("stroke", "rgba(248, 250, 252, 0.85)")
+            .attr("stroke-width", 0.8)
+            .style("fill", lightenColor(baseColor, 0.25))
+            .style("fill-opacity", Math.min(1, baseOpacity + 0.15));
+        } else {
+          node
+            .attr("stroke", "none")
+            .attr("stroke-width", 0)
+            .style("fill", baseColor)
+            .style("fill-opacity", baseOpacity);
+        }
+      });
+    }
+
     function drawFeatures() {
       if (!municipalityFeatures.length) return;
       const selection = featureLayer
@@ -412,7 +597,9 @@
       selection.exit().remove();
 
       const entered = selection.enter().append("path").attr("class", "feature municipality-level");
-      attachFeatureEvents(entered.merge(selection));
+      const merged = entered.merge(selection);
+      applyBaseFill(merged);
+      attachFeatureEvents(merged);
       featureLayer.selectAll("path").attr("role", "presentation");
     }
 
