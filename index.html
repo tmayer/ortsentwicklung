@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gemeinden – Erstmalige Erwähnung</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --surface: rgba(15, 23, 42, 0.78);
+      --border: rgba(148, 163, 184, 0.35);
+      --accent: #38bdf8;
+      --accent-muted: rgba(56, 189, 248, 0.35);
+      --accent-strong: rgba(248, 113, 113, 0.7);
+      --text-primary: #f8fafc;
+      --text-secondary: #cbd5f5;
+      --bg: radial-gradient(circle at 25% 20%, #0f172a, #020617 65%);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text-primary);
+    }
+
+    #app {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    #map {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+
+    #overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 400;
+    }
+
+    svg.overlay {
+      position: absolute;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    svg.overlay .feature {
+      fill: rgba(56, 189, 248, 0.18);
+      cursor: pointer;
+      pointer-events: auto;
+      transition: fill 0.2s ease, stroke 0.2s ease;
+    }
+
+    svg.overlay .feature:hover,
+    svg.overlay .feature.selected {
+      fill: var(--accent-muted);
+    }
+
+    svg.overlay .feature.selected.municipality-level {
+      fill: var(--accent-strong);
+    }
+
+    svg.overlay .germany-mask {
+      fill: rgba(15, 23, 42, 0.55);
+      pointer-events: none;
+    }
+
+    .info-panel {
+      position: absolute;
+      bottom: 1.5rem;
+      left: 1.5rem;
+      z-index: 500;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      min-width: 240px;
+      max-width: min(360px, calc(100vw - 3rem));
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 1rem 1.25rem;
+      backdrop-filter: blur(18px);
+      box-shadow:
+        0 20px 45px rgba(2, 6, 23, 0.45),
+        inset 0 0 0 1px rgba(248, 250, 252, 0.04);
+    }
+
+    .info-panel strong {
+      font-size: 1.1rem;
+      letter-spacing: 0.01em;
+    }
+
+    .info-panel span {
+      font-size: 0.95rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .info-panel.hidden-panel {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(2, 6, 23, 0.45);
+      z-index: 600;
+    }
+
+    .loading.hidden {
+      display: none;
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: 3px solid rgba(248, 250, 252, 0.15);
+      border-top-color: var(--accent);
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .info-panel {
+        display: none;
+      }
+
+      .info-panel.show-on-mobile {
+        display: flex;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="map" role="application" aria-label="Gemeindekarte Deutschlands"></div>
+    <div id="overlay"></div>
+
+    <div class="info-panel" id="info-panel">
+      <strong id="info-title">Gemeinden</strong>
+      <span id="info-detail">Fahre über eine Gemeinde, um Jahr und Beschreibung zu sehen. Klick öffnet Wikipedia. Auf Touch-Geräten bitte doppelt tippen.</span>
+    </div>
+
+    <div class="loading hidden" id="loading">
+      <div class="spinner" aria-hidden="true"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+  <script>
+    const MUNICIPALITY_FILE = "topojson/germany_municipalities_with_wiki.json";
+    const WIKIPEDIA_BASE_URL = "https://de.wikipedia.org/wiki/";
+    const DEFAULT_DETAIL = "Fahre über eine Gemeinde, um Jahr und Beschreibung zu sehen. Klick öffnet Wikipedia. Auf Touch-Geräten bitte doppelt tippen.";
+
+    const infoPanel = document.getElementById("info-panel");
+    const infoTitle = document.getElementById("info-title");
+    const infoDetail = document.getElementById("info-detail");
+    const loadingEl = document.getElementById("loading");
+    const pointerIsCoarse = (() => {
+      if (window.matchMedia) {
+        try {
+          return window.matchMedia("(pointer: coarse)").matches;
+        } catch (error) {}
+      }
+      const touchPoints = navigator.maxTouchPoints || navigator.msMaxTouchPoints || 0;
+      return touchPoints > 0;
+    })();
+    let tapTimer = null;
+
+    const map = L.map("map", {
+      minZoom: 5,
+      maxZoom: 13,
+      zoomControl: true,
+      zoomSnap: 0.25,
+      zoomDelta: 0.5,
+      wheelPxPerZoomLevel: 90,
+      attributionControl: false,
+      preferCanvas: true,
+      doubleClickZoom: false,
+    }).setView([51.1657, 10.4515], 6);
+
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+      subdomains: "abcd",
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+    }).addTo(map);
+
+    const overlayPane = map.getPanes().overlayPane;
+    const svg = d3.select(overlayPane).append("svg").attr("class", "overlay leaflet-zoom-animated");
+    const root = svg.append("g");
+    const maskLayer = root.append("path").attr("class", "germany-mask").attr("fill-rule", "evenodd");
+    const featureLayer = root.append("g").attr("class", "feature-layer");
+
+    const projector = d3.geoTransform({
+      point(lng, lat) {
+        const point = map.latLngToLayerPoint([lat, lng]);
+        this.stream.point(point.x, point.y);
+      },
+    });
+
+    const path = d3.geoPath().projection(projector);
+    let municipalityFeatures = [];
+    let germanyMaskFeature = null;
+
+    map.on("move zoom moveend zoomend viewreset", () => window.requestAnimationFrame(syncOverlay));
+    window.addEventListener("resize", () => {
+      map.invalidateSize();
+      syncOverlay();
+      toggleInfoPanelForViewport();
+    });
+    toggleInfoPanelForViewport();
+
+    resetInfo();
+    showLoading(true);
+
+    fetch(MUNICIPALITY_FILE)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("TopoJSON konnte nicht geladen werden.");
+        }
+        return response.json();
+      })
+      .then((topology) => {
+        const objectName = Object.keys(topology.objects)[0];
+        const topoObject = topology.objects[objectName];
+        const geojson = topojson.feature(topology, topoObject);
+        municipalityFeatures = geojson.features;
+        const merged = topojson.merge(topology, topoObject.geometries);
+        germanyMaskFeature = buildMaskFeature(merged);
+        drawFeatures();
+        fitToFeatures(municipalityFeatures);
+        syncOverlay();
+      })
+      .catch((error) => {
+        console.error(error);
+        setInfo("Fehler", "Die Gemeindedaten konnten nicht geladen werden.");
+      })
+      .finally(() => {
+        showLoading(false);
+      });
+
+    if (infoPanel) {
+      ["click", "pointerdown", "touchstart"].forEach((type) => {
+        infoPanel.addEventListener(type, (event) => event.stopPropagation(), {
+          passive: true,
+        });
+      });
+    }
+
+    function toggleInfoPanelForViewport() {
+      if (!infoPanel) return;
+      let isSmallScreen = window.innerWidth <= 640;
+      if (window.matchMedia) {
+        try {
+          isSmallScreen = window.matchMedia("(max-width: 640px)").matches;
+        } catch (error) {}
+      }
+      infoPanel.classList.toggle("show-on-mobile", isSmallScreen);
+    }
+
+    function setInfo(title, detailHtml) {
+      infoTitle.textContent = title;
+      infoDetail.innerHTML = detailHtml;
+    }
+
+    function resetInfo() {
+      setInfo("Gemeinden", DEFAULT_DETAIL);
+    }
+
+    function showLoading(show) {
+      loadingEl.classList.toggle("hidden", !show);
+    }
+
+    function codeFor(feature) {
+      return String(feature?.properties?.RS || feature?.properties?.AGS || feature?.properties?.ID_1 || "");
+    }
+
+    function nameFor(feature) {
+      return feature?.properties?.GEN || feature?.properties?.NAME || "Unbenannt";
+    }
+
+    function yearFor(feature) {
+      const raw = feature?.properties?.YR;
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function descriptionFor(feature) {
+      return feature?.properties?.DS ? String(feature.properties.DS) : "";
+    }
+
+    function wikipediaLinkFor(feature) {
+      const value = feature?.properties?.WI;
+      if (!value) return "";
+      const slug = String(value).trim();
+      if (!slug) return "";
+      if (/^https?:\/\//i.test(slug)) {
+        return slug;
+      }
+      return `${WIKIPEDIA_BASE_URL}${slug}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function updateInfoForFeature(feature) {
+      const name = nameFor(feature);
+      const year = yearFor(feature);
+      const description = descriptionFor(feature);
+      const yearText = year != null ? escapeHtml(year) : "kein Jahr hinterlegt";
+      const descriptionText = description ? escapeHtml(description) : "Beschreibung folgt.";
+      const detail = `Erstmalig erwähnt: <strong>${yearText}</strong><br /><span>${descriptionText}</span>`;
+      setInfo(name, detail);
+    }
+
+    function highlightPath(pathNode, active) {
+      if (!pathNode) return;
+      d3.select(pathNode).classed("selected", !!active);
+    }
+
+    function attachFeatureEvents(selection) {
+      selection
+        .on("pointerenter", function (event, feature) {
+          highlightPath(this, true);
+          updateInfoForFeature(feature);
+        })
+        .on("pointerleave", function () {
+          highlightPath(this, false);
+          resetInfo();
+        })
+        .on("click", function (event, feature) {
+          event.preventDefault();
+          handleFeatureActivation(feature);
+        })
+        .on("dblclick", function (event, feature) {
+          event.preventDefault();
+          handleFeatureActivation(feature, { force: true });
+        });
+    }
+
+    function handleFeatureActivation(feature, { force = false } = {}) {
+      updateInfoForFeature(feature);
+      const link = wikipediaLinkFor(feature);
+      if (!link) {
+        return;
+      }
+
+      if (pointerIsCoarse && !force) {
+        if (tapTimer) {
+          clearTimeout(tapTimer);
+          tapTimer = null;
+          openWikipedia(link);
+          return;
+        }
+        tapTimer = setTimeout(() => {
+          tapTimer = null;
+        }, 350);
+        return;
+      }
+
+      openWikipedia(link);
+    }
+
+    function openWikipedia(link) {
+      const href = typeof link === "string" ? link.trim() : "";
+      if (!href) return;
+      const newWindow = window.open(href, "_blank", "noopener,noreferrer");
+      if (newWindow && typeof newWindow.focus === "function") {
+        newWindow.focus();
+      }
+    }
+
+    function drawFeatures() {
+      if (!municipalityFeatures.length) return;
+      const selection = featureLayer
+        .selectAll("path.feature")
+        .data(municipalityFeatures, (feature) => codeFor(feature));
+
+      selection.exit().remove();
+
+      const entered = selection.enter().append("path").attr("class", "feature municipality-level");
+      attachFeatureEvents(entered.merge(selection));
+      featureLayer.selectAll("path").attr("role", "presentation");
+    }
+
+    function syncOverlay() {
+      if (!municipalityFeatures.length) {
+        return;
+      }
+      const bounds = path.bounds({
+        type: "FeatureCollection",
+        features: municipalityFeatures,
+      });
+      const topLeft = bounds[0];
+      const bottomRight = bounds[1];
+
+      svg
+        .attr("width", bottomRight[0] - topLeft[0])
+        .attr("height", bottomRight[1] - topLeft[1])
+        .style("left", `${topLeft[0]}px`)
+        .style("top", `${topLeft[1]}px`);
+
+      root.attr("transform", `translate(${-topLeft[0]}, ${-topLeft[1]})`);
+
+      featureLayer.selectAll("path").attr("d", path);
+      if (germanyMaskFeature) {
+        maskLayer.attr("d", path(germanyMaskFeature));
+      }
+    }
+
+    function fitToFeatures(features) {
+      if (!features.length) return;
+      const featureCollection = { type: "FeatureCollection", features };
+      const bounds = d3.geoBounds(featureCollection);
+      const sw = L.latLng(bounds[0][1], bounds[0][0]);
+      const ne = L.latLng(bounds[1][1], bounds[1][0]);
+      const padding = window.innerWidth < 768 ? [10, 10] : [30, 30];
+      map.fitBounds(L.latLngBounds(sw, ne), { padding });
+    }
+
+    function buildMaskFeature(merged) {
+      const outerRing = [
+        [-180, -90],
+        [180, -90],
+        [180, 90],
+        [-180, 90],
+        [-180, -90],
+      ];
+      let rings = [];
+      const geometry = merged && merged.type ? merged : merged?.geometry;
+      if (!geometry) {
+        return null;
+      }
+      if (geometry.type === "Polygon") {
+        rings = geometry.coordinates;
+      } else if (geometry.type === "MultiPolygon") {
+        rings = geometry.coordinates.flat();
+      }
+      return {
+        type: "Feature",
+        geometry: {
+          type: "Polygon",
+          coordinates: [outerRing, ...rings],
+        },
+      };
+    }
+  </script>
+</body>
+</html>
