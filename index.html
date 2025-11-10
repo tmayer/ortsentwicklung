@@ -354,8 +354,8 @@
     const GRADIENT_FILL_OPACITY = 0.9;
     const NEUTRAL_FILL_OPACITY = 0.35;
     const FILTER_DIM_FACTOR = 0.25;
-    const PLAYBACK_DELAY_MS = 35;
-    const PLAYBACK_STEP = 1;
+    const PLAYBACK_DELAY_MS = 50;
+    const PLAYBACK_STEP = 10;
 
     const appContainer = document.getElementById("app");
     const infoPanel = document.getElementById("info-panel");
@@ -927,8 +927,8 @@
           stopPlayback();
           return;
         }
-        setYearThreshold(yearThreshold + PLAYBACK_STEP);
-      }, PLAYBACK_DELAY_MS);
+        setYearThreshold(yearThreshold + playbackStep());
+      }, playbackDelay());
     }
 
     function stopPlayback() {
@@ -939,6 +939,14 @@
       if (!isPlaying) return;
       isPlaying = false;
       updatePlayButtonUI();
+    }
+
+    function playbackStep() {
+      return isSmallViewport() ? 10 : 1;
+    }
+
+    function playbackDelay() {
+      return isSmallViewport() ? 50 : 35;
     }
 
     function drawFeatures() {
