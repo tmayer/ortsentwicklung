@@ -88,6 +88,119 @@
       filter: grayscale(0.95);
     }
 
+    .horizontal-slider {
+      position: absolute;
+      bottom: 1.5rem;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(520px, calc(100vw - 12rem));
+      min-width: 260px;
+      z-index: 450;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 0.85rem 1.25rem 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 0.6rem;
+      box-shadow:
+        0 15px 35px rgba(2, 6, 23, 0.4),
+        inset 0 0 0 1px rgba(248, 250, 252, 0.04);
+      pointer-events: auto;
+      backdrop-filter: blur(10px);
+    }
+
+    .horizontal-slider .slider-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 0.35rem;
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .horizontal-slider .slider-label span {
+      font-size: 1.35rem;
+      color: var(--text-primary);
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      text-transform: none;
+    }
+
+    #year-slider {
+      width: 100%;
+      -webkit-appearance: none;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    #year-slider:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 4px;
+    }
+
+    #year-slider::-webkit-slider-runnable-track {
+      height: 10px;
+      background: var(--accent-muted);
+      border-radius: 999px;
+      border: 1px solid rgba(248, 250, 252, 0.08);
+    }
+
+    #year-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid rgba(15, 23, 42, 0.6);
+      box-shadow: 0 6px 12px rgba(2, 6, 23, 0.45);
+      margin-top: -7px;
+    }
+
+    #year-slider::-moz-range-track {
+      height: 10px;
+      background: var(--accent-muted);
+      border-radius: 999px;
+      border: 1px solid rgba(248, 250, 252, 0.08);
+    }
+
+    #year-slider::-moz-range-thumb {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid rgba(15, 23, 42, 0.6);
+      box-shadow: 0 6px 12px rgba(2, 6, 23, 0.45);
+    }
+
+    #year-slider::-ms-track {
+      height: 10px;
+      background: transparent;
+      border-color: transparent;
+      color: transparent;
+    }
+
+    #year-slider::-ms-fill-lower,
+    #year-slider::-ms-fill-upper {
+      background: var(--accent-muted);
+      border-radius: 999px;
+      border: 1px solid rgba(248, 250, 252, 0.08);
+    }
+
+    #year-slider::-ms-thumb {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid rgba(15, 23, 42, 0.6);
+      box-shadow: 0 6px 12px rgba(2, 6, 23, 0.45);
+    }
+
     .info-panel {
       position: absolute;
       bottom: 1.5rem;
@@ -106,6 +219,7 @@
       box-shadow:
         0 20px 45px rgba(2, 6, 23, 0.45),
         inset 0 0 0 1px rgba(248, 250, 252, 0.04);
+      transition: opacity 0.2s ease;
     }
 
     .info-panel strong {
@@ -113,15 +227,34 @@
       letter-spacing: 0.01em;
     }
 
-    .info-panel span {
-      font-size: 0.95rem;
-      color: var(--text-secondary);
-      line-height: 1.5;
-    }
-
     .info-panel.hidden-panel {
       opacity: 0;
       pointer-events: none;
+    }
+
+    .info-panel .info-close {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      width: 28px;
+      height: 28px;
+      border: none;
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.65);
+      color: var(--text-secondary);
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: color 0.2s ease, background 0.2s ease;
+    }
+
+    .info-panel .info-close:hover,
+    .info-panel .info-close:focus-visible {
+      background: rgba(56, 189, 248, 0.2);
+      color: var(--text-primary);
+      outline: none;
     }
 
     .loading {
@@ -154,6 +287,10 @@
     }
 
     @media (max-width: 640px) {
+      .horizontal-slider {
+        display: none;
+      }
+
       .info-panel {
         display: none;
       }
@@ -168,10 +305,23 @@
   <div id="app">
     <div id="map" role="application" aria-label="Gemeindekarte Deutschlands"></div>
     <div id="overlay"></div>
+    <div class="horizontal-slider" id="slider-shell" aria-hidden="false">
+      <input
+        type="range"
+        id="year-slider"
+        min="600"
+        max="1850"
+        step="1"
+        value="1850"
+        aria-label="Filter nach erstmaliger Erwähnung"
+      />
+      <div class="slider-label"><span id="year-slider-value">1850</span>Jahr</div>
+    </div>
 
     <div class="info-panel" id="info-panel">
+      <button class="info-close" id="info-close" aria-label="Info-Panel schließen" type="button">×</button>
       <strong id="info-title">Gemeinden</strong>
-      <span id="info-detail">Fahre über eine Gemeinde, um Jahr und Beschreibung zu sehen. Klick öffnet Wikipedia. Auf Touch-Geräten bitte doppelt tippen.</span>
+      <span id="info-detail">Gemeinde auswählen oder Jahresslider betätigen, um das Jahr der ersten Erwähnung in Urkunden zu sehen.</span>
     </div>
 
     <div class="loading hidden" id="loading">
@@ -185,7 +335,7 @@
   <script>
     const MUNICIPALITY_FILE = "topojson/germany_municipalities_with_wiki.json";
     const WIKIPEDIA_BASE_URL = "https://de.wikipedia.org/wiki/";
-    const DEFAULT_DETAIL = "Fahre über eine Gemeinde, um Jahr und Beschreibung zu sehen. Klick öffnet Wikipedia. Auf Touch-Geräten bitte doppelt tippen.";
+    const DEFAULT_DETAIL = "Gemeinde auswählen oder Jahresslider betätigen, um das Jahr der ersten Erwähnung in Urkunden zu sehen.";
     const YEAR_MIN = 600;
     const YEAR_MAX = 1850;
     const COLOR_STOPS = [
@@ -197,11 +347,15 @@
     const NEUTRAL_COLOR = "#38bdf8";
     const GRADIENT_FILL_OPACITY = 0.9;
     const NEUTRAL_FILL_OPACITY = 0.35;
+    const FILTER_DIM_FACTOR = 0.25;
 
+    const appContainer = document.getElementById("app");
     const infoPanel = document.getElementById("info-panel");
     const infoTitle = document.getElementById("info-title");
     const infoDetail = document.getElementById("info-detail");
     const loadingEl = document.getElementById("loading");
+    const sliderShell = document.getElementById("slider-shell");
+    const infoCloseButton = document.getElementById("info-close");
     const pointerIsCoarse = (() => {
       if (window.matchMedia) {
         try {
@@ -211,9 +365,14 @@
       const touchPoints = navigator.maxTouchPoints || navigator.msMaxTouchPoints || 0;
       return touchPoints > 0;
     })();
+    const yearSlider = document.getElementById("year-slider");
+    const yearSliderValue = document.getElementById("year-slider-value");
+    let yearThreshold = YEAR_MAX;
     let tapTimer = null;
     let gradientEnabled = true;
     let paletteControlButton = null;
+    let infoPanelToggleButton = null;
+    let infoPanelEnabled = true;
 
     const map = L.map("map", {
       minZoom: 5,
@@ -256,13 +415,17 @@
       map.invalidateSize();
       syncOverlay();
       toggleInfoPanelForViewport();
+      positionSliderShell();
     });
     toggleInfoPanelForViewport();
+    positionSliderShell();
     const toolbarControl = L.control({ position: "topleft" });
     toolbarControl.onAdd = () => {
       const container = L.DomUtil.create("div", "leaflet-bar custom-map-controls");
       paletteControlButton = createControlButton(container, "🎨", "Farbverlauf deaktivieren");
       paletteControlButton.classList.add("palette-button");
+      infoPanelToggleButton = createControlButton(container, "ℹ️", "Infofeld ausblenden");
+      infoPanelToggleButton.classList.add("info-toggle-button", "palette-button");
       L.DomEvent.disableClickPropagation(container);
       L.DomEvent.disableScrollPropagation(container);
       return container;
@@ -270,6 +433,8 @@
     toolbarControl.addTo(map);
     bindControlEvents();
     updatePaletteToggleUI();
+    updateInfoPanelToggleUI();
+    initYearSlider();
 
     resetInfo();
     showLoading(true);
@@ -307,6 +472,13 @@
         });
       });
     }
+    if (infoCloseButton) {
+      infoCloseButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        setInfoPanelEnabled(false);
+      });
+    }
+    positionSliderShell();
 
     function toggleInfoPanelForViewport() {
       if (!infoPanel) return;
@@ -317,6 +489,7 @@
         } catch (error) {}
       }
       infoPanel.classList.toggle("show-on-mobile", isSmallScreen);
+      positionSliderShell();
     }
 
     function createControlButton(container, symbol, title) {
@@ -329,14 +502,58 @@
       return button;
     }
 
+    function isInfoPanelVisible() {
+      if (!infoPanel || !infoPanelEnabled) return false;
+      if (infoPanel.classList.contains("hidden-panel")) {
+        return false;
+      }
+      const style = window.getComputedStyle(infoPanel);
+      if (style.display === "none" || style.visibility === "hidden") {
+        return false;
+      }
+      return true;
+    }
+
+    function positionSliderShell() {
+      if (!sliderShell || !appContainer) return;
+      const shellStyle = window.getComputedStyle(sliderShell);
+      if (shellStyle.display === "none") {
+        return;
+      }
+      const sliderWidth = sliderShell.offsetWidth;
+      if (!sliderWidth) return;
+      const containerWidth = appContainer.clientWidth;
+      let left = (containerWidth - sliderWidth) / 2;
+      const panelVisible = isInfoPanelVisible();
+      if (panelVisible) {
+        const panelBounds = infoPanel.getBoundingClientRect();
+        const containerBounds = appContainer.getBoundingClientRect();
+        const relativePanelRight = panelBounds.right - containerBounds.left;
+        const minLeftWithPanel = relativePanelRight + 16;
+        left = Math.max(left, minLeftWithPanel);
+      }
+      const minLeft = 24;
+      const maxLeft = Math.max(minLeft, containerWidth - sliderWidth - 24);
+      left = Math.min(Math.max(left, minLeft), maxLeft);
+      sliderShell.style.left = `${left}px`;
+      sliderShell.style.transform = "none";
+    }
+
     function bindControlEvents() {
-      if (!paletteControlButton) return;
-      L.DomEvent.on(paletteControlButton, "click", (event) => {
-        L.DomEvent.stop(event);
-        gradientEnabled = !gradientEnabled;
-        updatePaletteToggleUI();
-        refreshFeatureColors();
-      });
+      if (paletteControlButton) {
+        L.DomEvent.on(paletteControlButton, "click", (event) => {
+          L.DomEvent.stop(event);
+          gradientEnabled = !gradientEnabled;
+          updatePaletteToggleUI();
+          refreshFeatureColors();
+        });
+      }
+      if (infoPanelToggleButton) {
+        L.DomEvent.on(infoPanelToggleButton, "click", (event) => {
+          L.DomEvent.stop(event);
+          setInfoPanelEnabled(!infoPanelEnabled);
+        });
+      }
     }
 
     function updatePaletteToggleUI() {
@@ -347,6 +564,26 @@
       paletteControlButton.setAttribute("aria-pressed", gradientEnabled ? "true" : "false");
       paletteControlButton.setAttribute("aria-label", title);
       paletteControlButton.title = title;
+    }
+
+    function updateInfoPanelToggleUI() {
+      if (!infoPanelToggleButton) return;
+      const title = infoPanelEnabled ? "Infofeld ausblenden" : "Infofeld einblenden";
+      infoPanelToggleButton.classList.toggle("toggle-active", infoPanelEnabled);
+      infoPanelToggleButton.classList.toggle("palette-off", !infoPanelEnabled);
+      infoPanelToggleButton.setAttribute("aria-pressed", infoPanelEnabled ? "true" : "false");
+      infoPanelToggleButton.setAttribute("aria-label", title);
+      infoPanelToggleButton.title = title;
+    }
+
+    function setInfoPanelEnabled(enabled) {
+      infoPanelEnabled = Boolean(enabled);
+      if (infoPanel) {
+        infoPanel.classList.toggle("hidden-panel", !infoPanelEnabled);
+        infoPanel.setAttribute("aria-hidden", infoPanelEnabled ? "false" : "true");
+      }
+      updateInfoPanelToggleUI();
+      positionSliderShell();
     }
 
     function setInfo(title, detailHtml) {
@@ -374,10 +611,6 @@
       const raw = feature?.properties?.YR;
       const parsed = Number(raw);
       return Number.isFinite(parsed) ? parsed : null;
-    }
-
-    function descriptionFor(feature) {
-      return feature?.properties?.DS ? String(feature.properties.DS) : "";
     }
 
     function clampYearValue(year) {
@@ -470,11 +703,22 @@
     function updateInfoForFeature(feature) {
       const name = nameFor(feature);
       const year = yearFor(feature);
-      const description = descriptionFor(feature);
       const yearText = year != null ? escapeHtml(year) : "kein Jahr hinterlegt";
-      const descriptionText = description ? escapeHtml(description) : "Beschreibung folgt.";
-      const detail = `Erstmalig erwähnt: <strong>${yearText}</strong><br /><span>${descriptionText}</span>`;
+      const detail = `Erstmalig erwähnt: <strong>${yearText}</strong>`;
       setInfo(name, detail);
+    }
+
+    function featurePassesYearFilter(feature) {
+      const year = yearFor(feature);
+      if (year == null) return true;
+      return year <= yearThreshold;
+    }
+
+    function styleForFeature(feature) {
+      const passesFilter = featurePassesYearFilter(feature);
+      const baseColor = passesFilter ? baseFillFor(feature) : DEFAULT_COLOR;
+      const opacity = passesFilter ? baseOpacityFor() : Math.max(0.08, baseOpacityFor() * FILTER_DIM_FACTOR);
+      return { fill: baseColor, opacity };
     }
 
     function highlightPath(pathNode, active) {
@@ -553,8 +797,7 @@
 
     function applyBaseFill(selection) {
       selection.each(function (feature) {
-        const baseColor = baseFillFor(feature);
-        const baseOpacity = baseOpacityFor();
+        const { fill: baseColor, opacity: baseOpacity } = styleForFeature(feature);
         d3.select(this)
           .attr("data-base-fill", baseColor)
           .attr("data-base-opacity", baseOpacity)
@@ -568,8 +811,7 @@
     function refreshFeatureColors() {
       featureLayer.selectAll("path.feature").each(function (feature) {
         const node = d3.select(this);
-        const baseColor = baseFillFor(feature);
-        const baseOpacity = baseOpacityFor();
+        const { fill: baseColor, opacity: baseOpacity } = styleForFeature(feature);
         node.attr("data-base-fill", baseColor);
         node.attr("data-base-opacity", baseOpacity);
         if (node.classed("selected")) {
@@ -586,6 +828,27 @@
             .style("fill-opacity", baseOpacity);
         }
       });
+    }
+
+    function initYearSlider() {
+      if (!yearSlider) return;
+      yearSlider.setAttribute("min", YEAR_MIN);
+      yearSlider.setAttribute("max", YEAR_MAX);
+      yearSlider.value = String(yearThreshold);
+      updateSliderValue(yearThreshold);
+      yearSlider.addEventListener("input", (event) => {
+        const next = Number(event.target.value);
+        if (!Number.isFinite(next)) return;
+        yearThreshold = next;
+        updateSliderValue(next);
+        refreshFeatureColors();
+      });
+    }
+
+    function updateSliderValue(value) {
+      if (yearSliderValue) {
+        yearSliderValue.textContent = value;
+      }
     }
 
     function drawFeatures() {
