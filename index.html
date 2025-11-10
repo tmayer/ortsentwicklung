@@ -111,6 +111,10 @@
       backdrop-filter: blur(10px);
     }
 
+    .horizontal-slider.slider-hidden {
+      display: none;
+    }
+
     .horizontal-slider .slider-label {
       display: flex;
       align-items: baseline;
@@ -288,7 +292,9 @@
 
     @media (max-width: 640px) {
       .horizontal-slider {
-        display: none;
+        width: calc(100vw - 2.5rem);
+        left: 50%;
+        transform: translateX(-50%);
       }
 
       .info-panel {
@@ -306,6 +312,7 @@
     <div id="map" role="application" aria-label="Gemeindekarte Deutschlands"></div>
     <div id="overlay"></div>
     <div class="horizontal-slider" id="slider-shell" aria-hidden="false">
+      <div class="slider-label"><span>Jahr</span><span id="year-slider-value">1850</span></div>
       <input
         type="range"
         id="year-slider"
@@ -315,12 +322,11 @@
         value="1850"
         aria-label="Filter nach erstmaliger Erwähnung"
       />
-      <div class="slider-label"><span id="year-slider-value">1850</span>Jahr</div>
     </div>
 
     <div class="info-panel" id="info-panel">
       <button class="info-close" id="info-close" aria-label="Info-Panel schließen" type="button">×</button>
-      <strong id="info-title">Gemeinden</strong>
+      <strong id="info-title"></strong>
       <span id="info-detail">Gemeinde auswählen oder Jahresslider betätigen, um das Jahr der ersten Erwähnung in Urkunden zu sehen.</span>
     </div>
 
@@ -333,7 +339,7 @@
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
   <script>
-    const MUNICIPALITY_FILE = "topojson/germany_municipalities_with_wiki.json";
+    const MUNICIPALITY_FILE = "topojson/germany_municipalities_with_year.json";
     const WIKIPEDIA_BASE_URL = "https://de.wikipedia.org/wiki/";
     const DEFAULT_DETAIL = "Gemeinde auswählen oder Jahresslider betätigen, um das Jahr der ersten Erwähnung in Urkunden zu sehen.";
     const YEAR_MIN = 600;
@@ -344,10 +350,12 @@
       { year: YEAR_MAX, color: "#b91c1c" }, // Rot
     ];
     const DEFAULT_COLOR = "#475569";
-    const NEUTRAL_COLOR = "#38bdf8";
+    const NEUTRAL_COLOR = "steelblue";
     const GRADIENT_FILL_OPACITY = 0.9;
     const NEUTRAL_FILL_OPACITY = 0.35;
     const FILTER_DIM_FACTOR = 0.25;
+    const PLAYBACK_DELAY_MS = 35;
+    const PLAYBACK_STEP = 1;
 
     const appContainer = document.getElementById("app");
     const infoPanel = document.getElementById("info-panel");
@@ -372,7 +380,10 @@
     let gradientEnabled = true;
     let paletteControlButton = null;
     let infoPanelToggleButton = null;
-    let infoPanelEnabled = true;
+    let playControlButton = null;
+    let infoPanelEnabled = !isSmallViewport();
+    let isPlaying = false;
+    let playbackTimer = null;
 
     const map = L.map("map", {
       minZoom: 5,
@@ -414,11 +425,9 @@
     window.addEventListener("resize", () => {
       map.invalidateSize();
       syncOverlay();
-      toggleInfoPanelForViewport();
-      positionSliderShell();
+      handleViewportChange();
     });
-    toggleInfoPanelForViewport();
-    positionSliderShell();
+    handleViewportChange();
     const toolbarControl = L.control({ position: "topleft" });
     toolbarControl.onAdd = () => {
       const container = L.DomUtil.create("div", "leaflet-bar custom-map-controls");
@@ -426,6 +435,8 @@
       paletteControlButton.classList.add("palette-button");
       infoPanelToggleButton = createControlButton(container, "ℹ️", "Infofeld ausblenden");
       infoPanelToggleButton.classList.add("info-toggle-button", "palette-button");
+      playControlButton = createControlButton(container, "⏯️", "Animation starten");
+      playControlButton.classList.add("playback-button", "palette-button");
       L.DomEvent.disableClickPropagation(container);
       L.DomEvent.disableScrollPropagation(container);
       return container;
@@ -434,6 +445,7 @@
     bindControlEvents();
     updatePaletteToggleUI();
     updateInfoPanelToggleUI();
+    updatePlayButtonUI();
     initYearSlider();
 
     resetInfo();
@@ -477,19 +489,6 @@
         event.preventDefault();
         setInfoPanelEnabled(false);
       });
-    }
-    positionSliderShell();
-
-    function toggleInfoPanelForViewport() {
-      if (!infoPanel) return;
-      let isSmallScreen = window.innerWidth <= 640;
-      if (window.matchMedia) {
-        try {
-          isSmallScreen = window.matchMedia("(max-width: 640px)").matches;
-        } catch (error) {}
-      }
-      infoPanel.classList.toggle("show-on-mobile", isSmallScreen);
-      positionSliderShell();
     }
 
     function createControlButton(container, symbol, title) {
@@ -554,6 +553,12 @@
           setInfoPanelEnabled(!infoPanelEnabled);
         });
       }
+      if (playControlButton) {
+        L.DomEvent.on(playControlButton, "click", (event) => {
+          L.DomEvent.stop(event);
+          togglePlayback();
+        });
+      }
     }
 
     function updatePaletteToggleUI() {
@@ -576,23 +581,66 @@
       infoPanelToggleButton.title = title;
     }
 
+    function updatePlayButtonUI() {
+      if (!playControlButton) return;
+      const title = isPlaying ? "Animation stoppen" : "Animation starten";
+      playControlButton.classList.toggle("toggle-active", isPlaying);
+      playControlButton.classList.toggle("palette-off", !isPlaying);
+      playControlButton.setAttribute("aria-pressed", isPlaying ? "true" : "false");
+      playControlButton.setAttribute("aria-label", title);
+      playControlButton.title = title;
+    }
+
     function setInfoPanelEnabled(enabled) {
       infoPanelEnabled = Boolean(enabled);
-      if (infoPanel) {
-        infoPanel.classList.toggle("hidden-panel", !infoPanelEnabled);
-        infoPanel.setAttribute("aria-hidden", infoPanelEnabled ? "false" : "true");
-      }
       updateInfoPanelToggleUI();
+      applyInfoPanelVisibility();
       positionSliderShell();
     }
 
+    function handleViewportChange() {
+      applyInfoPanelVisibility();
+      positionSliderShell();
+    }
+
+    function applyInfoPanelVisibility() {
+      if (!infoPanel) return;
+      infoPanel.classList.toggle("hidden-panel", !infoPanelEnabled);
+      infoPanel.setAttribute("aria-hidden", infoPanelEnabled ? "false" : "true");
+      const small = isSmallViewport();
+      if (small) {
+        infoPanel.classList.toggle("show-on-mobile", infoPanelEnabled);
+      } else {
+        infoPanel.classList.remove("show-on-mobile");
+      }
+      syncSliderVisibility();
+    }
+
+    function syncSliderVisibility() {
+      if (!sliderShell) return;
+      const shouldHide = isSmallViewport() && infoPanelEnabled;
+      sliderShell.classList.toggle("slider-hidden", shouldHide);
+    }
+
+    function isSmallViewport() {
+      if (window.matchMedia) {
+        try {
+          return window.matchMedia("(max-width: 640px)").matches;
+        } catch (error) {}
+      }
+      return window.innerWidth <= 640;
+    }
+
     function setInfo(title, detailHtml) {
-      infoTitle.textContent = title;
+      if (infoTitle) {
+        infoTitle.textContent = title || "";
+        infoTitle.style.display = title ? "block" : "none";
+      }
       infoDetail.innerHTML = detailHtml;
     }
 
     function resetInfo() {
-      setInfo("Gemeinden", DEFAULT_DETAIL);
+      setInfo("", DEFAULT_DETAIL);
     }
 
     function showLoading(show) {
@@ -839,16 +887,58 @@
       yearSlider.addEventListener("input", (event) => {
         const next = Number(event.target.value);
         if (!Number.isFinite(next)) return;
-        yearThreshold = next;
-        updateSliderValue(next);
-        refreshFeatureColors();
+        stopPlayback();
+        setYearThreshold(next, { syncSlider: false });
       });
+    }
+
+    function setYearThreshold(value, { syncSlider = true } = {}) {
+      if (!Number.isFinite(value)) return;
+      const clamped = Math.max(YEAR_MIN, Math.min(YEAR_MAX, Math.round(value)));
+      yearThreshold = clamped;
+      if (syncSlider && yearSlider) {
+        yearSlider.value = String(clamped);
+      }
+      updateSliderValue(clamped);
+      refreshFeatureColors();
     }
 
     function updateSliderValue(value) {
       if (yearSliderValue) {
         yearSliderValue.textContent = value;
       }
+    }
+
+    function togglePlayback() {
+      if (isPlaying) {
+        stopPlayback();
+      } else {
+        startPlayback();
+      }
+    }
+
+    function startPlayback() {
+      if (isPlaying) return;
+      isPlaying = true;
+      updatePlayButtonUI();
+      setYearThreshold(YEAR_MIN);
+      playbackTimer = window.setInterval(() => {
+        if (yearThreshold >= YEAR_MAX) {
+          stopPlayback();
+          return;
+        }
+        setYearThreshold(yearThreshold + PLAYBACK_STEP);
+      }, PLAYBACK_DELAY_MS);
+    }
+
+    function stopPlayback() {
+      if (playbackTimer) {
+        clearInterval(playbackTimer);
+        playbackTimer = null;
+      }
+      if (!isPlaying) return;
+      isPlaying = false;
+      updatePlayButtonUI();
     }
 
     function drawFeatures() {
